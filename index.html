@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Endless Runner 3D</title>
+<style>
+body { margin:0; overflow:hidden; font-family:sans-serif; background:#000; }
+
+/* Glass UI */
+.ui {
+  position:absolute;
+  top:0; left:0; width:100%; height:100%;
+  display:flex; justify-content:center; align-items:center;
+  flex-direction:column;
+  backdrop-filter: blur(10px);
+  background: rgba(0,0,0,0.4);
+  color:white;
+}
+
+button {
+  padding:15px 30px;
+  font-size:18px;
+  border:none;
+  border-radius:10px;
+  background: rgba(255,255,255,0.2);
+  color:white;
+  cursor:pointer;
+}
+
+#hud {
+  position:absolute;
+  top:20px;
+  left:20px;
+  color:white;
+  font-size:20px;
+}
+</style>
+</head>
+<body>
+
+<div id="startScreen" class="ui">
+  <h1>Temple Runner</h1>
+  <button onclick="game.start()">Play</button>
+</div>
+
+<div id="gameOverScreen" class="ui" style="display:none;">
+  <h1>Game Over</h1>
+  <button onclick="game.restart()">Restart</button>
+</div>
+
+<div id="hud">Score: 0</div>
+
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js";
+
+/* ================= GAME ================= */
+class Game {
+  constructor() {
+    this.clock = new THREE.Clock();
+    this.running = false;
+    this.score = 0;
+
+    this.sceneManager = new SceneManager();
+    this.player = new Player(this.sceneManager.scene);
+    this.physics = new Physics(this.player);
+    this.obstacles = new ObstacleManager(this.sceneManager.scene);
+    this.input = new InputManager(this.player);
+    this.ui = new UIManager();
+
+    this.loop = this.loop.bind(this);
+  }
+
+  start() {
+    document.getElementById("startScreen").style.display="none";
+    this.running = true;
+    this.loop();
+  }
+
+  restart() {
+    location.reload();
+  }
+
+  loop() {
+    if (!this.running) return;
+
+    const delta = this.clock.getDelta();
+
+    this.player.update(delta);
+    this.physics.update(delta);
+    this.obstacles.update(delta);
+
+    if (this.obstacles.checkCollision(this.player)) {
+      this.gameOver();
+    }
+
+    this.sceneManager.update(this.player);
+    this.ui.update(this.score += delta * 10);
+
+    this.sceneManager.renderer.render(
+      this.sceneManager.scene,
+      this.sceneManager.camera
+    );
+
+    requestAnimationFrame(this.loop);
+  }
+
+  gameOver() {
+    this.running = false;
+    document.getElementById("gameOverScreen").style.display="flex";
+  }
+}
+
+/* ================= SCENE ================= */
+class SceneManager {
+  constructor() {
+    this.scene = new THREE.Scene();
+    this.scene.fog = new THREE.Fog(0x000000, 10, 60);
+
+    this.camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 100);
+    this.camera.position.set(0, 3, 6);
+
+    this.renderer = new THREE.WebGLRenderer({antialias:true});
+    this.renderer.setSize(innerWidth, innerHeight);
+    this.renderer.shadowMap.enabled = true;
+    document.body.appendChild(this.renderer.domElement);
+
+    /* LIGHTING */
+    const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+    this.scene.add(ambient);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+    dirLight.position.set(5,10,5);
+    dirLight.castShadow = true;
+    this.scene.add(dirLight);
+
+    /* GROUND */
+    this.ground = [];
+    for (let i=0;i<10;i++) {
+      const geo = new THREE.BoxGeometry(6,0.1,10);
+      const mat = new THREE.MeshStandardMaterial({color:0x222222});
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.receiveShadow = true;
+      mesh.position.z = -i * 10;
+      this.scene.add(mesh);
+      this.ground.push(mesh);
+    }
+  }
+
+  update(player) {
+    /* CAMERA FOLLOW */
+    this.camera.position.x += (player.mesh.position.x - this.camera.position.x) * 0.1;
+    this.camera.position.y = 3;
+    this.camera.position.z = player.mesh.position.z + 6;
+
+    this.camera.lookAt(player.mesh.position);
+
+    /* LOOP GROUND */
+    this.ground.forEach(tile=>{
+      if (tile.position.z > player.mesh.position.z + 10) {
+        tile.position.z -= 100;
+      }
+      tile.position.z += 0.5;
+    });
+  }
+}
+
+/* ================= PLAYER ================= */
+class Player {
+  constructor(scene) {
+    this.lane = 0;
+    this.targetX = 0;
+
+    this.velocityY = 0;
+    this.isJumping = false;
+
+    const geo = new THREE.BoxGeometry(1,1,1);
+    const mat = new THREE.MeshStandardMaterial({color:0xff4444});
+    this.mesh = new THREE.Mesh(geo, mat);
+    this.mesh.castShadow = true;
+
+    scene.add(this.mesh);
+  }
+
+  moveLeft() {
+    if (this.lane > -1) this.lane--;
+    this.targetX = this.lane * 2;
+  }
+
+  moveRight() {
+    if (this.lane < 1) this.lane++;
+    this.targetX = this.lane * 2;
+  }
+
+  jump() {
+    if (!this.isJumping) {
+      this.velocityY = 8;
+      this.isJumping = true;
+    }
+  }
+
+  update(delta) {
+    /* LERP LANE */
+    this.mesh.position.x += (this.targetX - this.mesh.position.x) * 0.2;
+
+    /* RUN ANIMATION */
+    this.mesh.scale.y = 1 + Math.sin(Date.now()*0.01)*0.1;
+  }
+}
+
+/* ================= PHYSICS ================= */
+class Physics {
+  constructor(player) {
+    this.player = player;
+    this.gravity = -20;
+  }
+
+  update(delta) {
+    if (this.player.isJumping) {
+      this.player.velocityY += this.gravity * delta;
+      this.player.mesh.position.y += this.player.velocityY * delta;
+
+      if (this.player.mesh.position.y <= 0) {
+        this.player.mesh.position.y = 0;
+        this.player.isJumping = false;
+      }
+    }
+  }
+}
+
+/* ================= OBSTACLES ================= */
+class ObstacleManager {
+  constructor(scene) {
+    this.scene = scene;
+    this.obstacles = [];
+    this.spawnTimer = 0;
+  }
+
+  spawn() {
+    const geo = new THREE.BoxGeometry(1,1,1);
+    const mat = new THREE.MeshStandardMaterial({color:0x00ffcc});
+    const mesh = new THREE.Mesh(geo, mat);
+
+    mesh.position.set(
+      (Math.floor(Math.random()*3)-1)*2,
+      0,
+      -50
+    );
+
+    mesh.castShadow = true;
+    this.scene.add(mesh);
+    this.obstacles.push(mesh);
+  }
+
+  update(delta) {
+    this.spawnTimer += delta;
+
+    if (this.spawnTimer > 1) {
+      this.spawn();
+      this.spawnTimer = 0;
+    }
+
+    this.obstacles.forEach(o=>{
+      o.position.z += 0.5;
+    });
+  }
+
+  checkCollision(player) {
+    return this.obstacles.some(o=>{
+      return o.position.distanceTo(player.mesh.position) < 1;
+    });
+  }
+}
+
+/* ================= INPUT ================= */
+class InputManager {
+  constructor(player) {
+    window.addEventListener("keydown",(e)=>{
+      if (e.key==="ArrowLeft") player.moveLeft();
+      if (e.key==="ArrowRight") player.moveRight();
+      if (e.key===" " || e.key==="ArrowUp") player.jump();
+    });
+
+    /* MOBILE SWIPE */
+    let startX = 0;
+    window.addEventListener("touchstart",e=>{
+      startX = e.touches[0].clientX;
+    });
+
+    window.addEventListener("touchend",e=>{
+      const dx = e.changedTouches[0].clientX - startX;
+      if (dx > 50) player.moveRight();
+      if (dx < -50) player.moveLeft();
+    });
+  }
+}
+
+/* ================= UI ================= */
+class UIManager {
+  update(score) {
+    document.getElementById("hud").innerText = "Score: " + Math.floor(score);
+  }
+}
+
+/* ================= INIT ================= */
+const game = new Game();
+window.game = game;
+
+</script>
+</body>
+</html>
