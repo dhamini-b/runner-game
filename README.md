@@ -7,7 +7,7 @@ The game features smooth animations, lane-based movement, obstacle avoidance, an
 
 ## 🚀 Live Demo
 
-- 🌐 AWS (S3): https://your-aws-link  
+- 🌐 AWS (S3): http://my-runner-game-12.s3-website.ap-south-1.amazonaws.com 
 - 🌍 GitHub Pages: https://dhamini-b.github.io/runner-game/
 
 ---
